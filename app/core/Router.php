@@ -45,6 +45,9 @@ class Router
 
         // Phase 9 -- Admin Dashboard & Audit Log
         'audit-log' => ['AuditController', 'index'],
+
+        // Profile (spec'd in Section 6, teknisi navbar slot since Phase 2 -- unwired until now)
+        'profile' => ['ProfileController', 'index'],
     ];
 
     public static function dispatch(): void
