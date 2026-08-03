@@ -46,15 +46,28 @@ class UsageLogController
         require __DIR__ . '/../views/partials/footer.php';
     }
 
+    /**
+     * Multi-log UX pass: logs every material checked on the form in one
+     * submit, instead of the old one-material-per-POST radio flow.
+     * Everything is pre-validated before any write happens, so a bad
+     * row (missing qty, no SN chosen) blocks the whole batch with a
+     * clear message rather than silently dropping it. Once writes
+     * start, each material is still its own transaction (see
+     * UsageLog::create()) -- a rare mid-batch failure (e.g. someone
+     * else claims the same SN a second earlier) only affects that one
+     * item; everything already written stays logged, and the response
+     * reports exactly which item(s) didn't go through so the
+     * technician isn't stuck resubmitting materials that already succeeded.
+     */
     public function save(): void
     {
         Auth::requireRole('teknisi');
 
         $user = Auth::user();
         $woId = (int) ($_POST['wo_id'] ?? 0);
-        $materialId = (int) ($_POST['material_id'] ?? 0);
-        $serialId = isset($_POST['serial_id']) && $_POST['serial_id'] !== '' ? (int) $_POST['serial_id'] : null;
-        $qtyUsed = $_POST['qty_used'] ?? null;
+        $materialIds = array_map('intval', $_POST['material_ids'] ?? []);
+        $qtyInputs = $_POST['qty_used'] ?? [];
+        $serialInputs = $_POST['serial_id'] ?? [];
 
         $errors = [];
 
@@ -65,13 +78,45 @@ class UsageLogController
             $errors[] = 'Work Order tidak valid atau bukan WO open milik kamu.';
         }
 
-        $material = $materialId ? Material::find($materialId) : null;
-        if (!$material) {
-            $errors[] = 'Material tidak ditemukan.';
-        } elseif ($material['tracking_type'] === 'serial' && !$serialId) {
-            $errors[] = 'Pilih SN yang digunakan.';
-        } elseif ($material['tracking_type'] === 'quantity' && (!is_numeric($qtyUsed) || (float) $qtyUsed <= 0)) {
-            $errors[] = 'Jumlah yang digunakan harus berupa angka lebih dari 0.';
+        if (empty($materialIds)) {
+            $errors[] = 'Pilih minimal satu material yang digunakan.';
+        }
+
+        $items = [];
+        foreach ($materialIds as $materialId) {
+            $material = Material::find($materialId);
+            if (!$material) {
+                $errors[] = "Material #{$materialId} tidak ditemukan.";
+                continue;
+            }
+
+            if ($material['tracking_type'] === 'serial') {
+                $serialId = isset($serialInputs[$materialId]) && $serialInputs[$materialId] !== ''
+                    ? (int) $serialInputs[$materialId]
+                    : null;
+                if (!$serialId) {
+                    $errors[] = "{$material['description']}: pilih SN yang digunakan.";
+                    continue;
+                }
+                $items[] = [
+                    'material_id' => $materialId,
+                    'serial_id'   => $serialId,
+                    'qty_used'    => null,
+                    'label'       => $material['description'],
+                ];
+            } else {
+                $qty = $qtyInputs[$materialId] ?? null;
+                if (!is_numeric($qty) || (float) $qty <= 0) {
+                    $errors[] = "{$material['description']}: jumlah yang digunakan harus berupa angka lebih dari 0.";
+                    continue;
+                }
+                $items[] = [
+                    'material_id' => $materialId,
+                    'serial_id'   => null,
+                    'qty_used'    => $qty,
+                    'label'       => $material['description'],
+                ];
+            }
         }
 
         if (!empty($errors)) {
@@ -80,22 +125,38 @@ class UsageLogController
             exit;
         }
 
-        try {
-            $newLogId = UsageLog::create([
-                'wo_id'         => $woId,
-                'technician_id' => $user['id'],
-                'material_id'   => $materialId,
-                'serial_id'     => $serialId,
-                'qty_used'      => $qtyUsed,
-            ]);
-            $after = UsageLog::find($newLogId);
-            AuditLog::record((int) $user['id'], 'create', 'usage_logs', $newLogId, null, $after);
-            $_SESSION['log_usage_flash'] = ['success' => 'Penggunaan material berhasil dicatat.'];
-        } catch (RuntimeException $e) {
-            // Stock/SN no longer available -- message is already user-safe.
-            $_SESSION['log_usage_flash'] = ['errors' => [$e->getMessage()]];
-        } catch (InvalidArgumentException $e) {
-            $_SESSION['log_usage_flash'] = ['errors' => ['Material tidak ditemukan.']];
+        $successCount = 0;
+        $writeErrors = [];
+
+        foreach ($items as $item) {
+            try {
+                $newLogId = UsageLog::create([
+                    'wo_id'         => $woId,
+                    'technician_id' => $user['id'],
+                    'material_id'   => $item['material_id'],
+                    'serial_id'     => $item['serial_id'],
+                    'qty_used'      => $item['qty_used'],
+                ]);
+                $after = UsageLog::find($newLogId);
+                AuditLog::record((int) $user['id'], 'create', 'usage_logs', $newLogId, null, $after);
+                $successCount++;
+            } catch (RuntimeException $e) {
+                // Stock/SN no longer available -- message is already user-safe.
+                $writeErrors[] = "{$item['label']}: {$e->getMessage()}";
+            } catch (InvalidArgumentException $e) {
+                $writeErrors[] = "{$item['label']}: material tidak ditemukan.";
+            }
+        }
+
+        if ($successCount > 0 && empty($writeErrors)) {
+            $_SESSION['log_usage_flash'] = ['success' => "{$successCount} material berhasil dicatat."];
+        } elseif ($successCount > 0) {
+            $_SESSION['log_usage_flash'] = [
+                'success' => "{$successCount} material berhasil dicatat.",
+                'errors'  => $writeErrors,
+            ];
+        } else {
+            $_SESSION['log_usage_flash'] = ['errors' => $writeErrors];
         }
 
         header('Location: index.php?page=log-usage');

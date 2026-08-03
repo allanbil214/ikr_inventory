@@ -1,6 +1,13 @@
 // log-usage.js
 // Phase 6 -- progressive-enhancement helpers for the teknisi Log Usage
 // screen. No framework; plain DOM events, matching materials.js.
+//
+// Multi-log UX pass: material picking is now checkboxes instead of a
+// radio group, and each card's qty/SN input lives inline right below
+// that card (toggled per-item) instead of one shared block at the
+// bottom of the list. Submit is enabled once at least one material is
+// checked; each checked item's own input carries `required` so the
+// browser blocks submit on incomplete rows without extra JS.
 
 document.addEventListener('DOMContentLoaded', function () {
     var form = document.getElementById('material-form');
@@ -8,16 +15,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     var searchInput = document.getElementById('material-search');
     var chipRow = document.getElementById('material-category-chips');
-    var pickerCards = document.querySelectorAll('.material-picker-card');
-    var materialRadios = document.querySelectorAll('.material-picker-radio');
+    var pickerItems = document.querySelectorAll('.material-picker-item');
+    var materialCheckboxes = document.querySelectorAll('.material-picker-checkbox');
 
-    var usageSection = document.getElementById('usage-input-section');
-    var usageLabel = document.getElementById('usage-input-label');
-    var qtyGroup = document.getElementById('qty-input-group');
-    var qtyInput = document.getElementById('qty_used');
-    var qtyStockHint = document.getElementById('qty-stock-hint');
-    var snSelects = document.querySelectorAll('.sn-select');
-    var snEmptyHint = document.getElementById('sn-empty-hint');
+    var summaryText = document.getElementById('log-usage-summary-text');
     var submitBtn = document.getElementById('log-usage-submit');
 
     // Phase 7 -- mini "log terbaru" panel per WO, shown once a WO is picked.
@@ -41,10 +42,10 @@ document.addEventListener('DOMContentLoaded', function () {
     function applyFilters() {
         var search = (searchInput.value || '').toLowerCase().trim();
 
-        pickerCards.forEach(function (card) {
-            var matchesCategory = activeCategory === '' || card.getAttribute('data-category') === activeCategory;
-            var matchesSearch = search === '' || card.getAttribute('data-search').indexOf(search) !== -1;
-            card.classList.toggle('hidden-by-filter', !(matchesCategory && matchesSearch));
+        pickerItems.forEach(function (item) {
+            var matchesCategory = activeCategory === '' || item.getAttribute('data-category') === activeCategory;
+            var matchesSearch = search === '' || item.getAttribute('data-search').indexOf(search) !== -1;
+            item.classList.toggle('hidden-by-filter', !(matchesCategory && matchesSearch));
         });
     }
 
@@ -63,63 +64,61 @@ document.addEventListener('DOMContentLoaded', function () {
         searchInput.addEventListener('input', applyFilters);
     }
 
-    function resetUsageInputs() {
-        qtyGroup.style.display = 'none';
-        qtyInput.disabled = true;
-        qtyInput.required = false;
-        qtyInput.value = '';
+    function updateSummary() {
+        var checked = document.querySelectorAll('.material-picker-checkbox:checked');
+        var count = checked.length;
 
-        snSelects.forEach(function (sel) {
-            sel.style.display = 'none';
-            sel.disabled = true;
-            sel.required = false;
-        });
-
-        snEmptyHint.style.display = 'none';
+        submitBtn.disabled = count === 0;
+        summaryText.textContent = count === 0
+            ? 'Belum ada material dipilih'
+            : count + ' material dipilih';
     }
 
-    function onMaterialSelected(radio) {
-        pickerCards.forEach(function (card) { card.classList.remove('selected'); });
-        radio.closest('.material-picker-card').classList.add('selected');
+    function onMaterialToggled(checkbox) {
+        var materialId = checkbox.getAttribute('data-material-id');
+        var card = checkbox.closest('.material-picker-card');
+        var inlineSection = document.getElementById('usage-input-' + materialId);
 
-        resetUsageInputs();
-        usageSection.style.display = 'block';
+        card.classList.toggle('selected', checkbox.checked);
 
-        var tracking = radio.getAttribute('data-tracking');
-        var description = radio.getAttribute('data-description');
+        if (!inlineSection) {
+            updateSummary();
+            return;
+        }
 
-        if (tracking === 'quantity') {
-            usageLabel.textContent = 'Jumlah Digunakan — ' + description;
-            qtyGroup.style.display = 'block';
-            qtyInput.disabled = false;
-            qtyInput.required = true;
-            var stock = parseFloat(radio.getAttribute('data-stock')) || 0;
-            var unit = radio.getAttribute('data-unit');
-            qtyInput.max = stock;
-            qtyStockHint.textContent = 'Sisa stok: ' + stock + ' ' + unit;
-            qtyStockHint.classList.toggle('stock-hint-warning', stock <= 0);
+        var qtyInput = inlineSection.querySelector('.qty-input-inline');
+        var snSelect = inlineSection.querySelector('.sn-select-inline');
+
+        if (checkbox.checked) {
+            inlineSection.style.display = 'block';
+            if (qtyInput) {
+                qtyInput.disabled = false;
+                qtyInput.required = true;
+            }
+            if (snSelect) {
+                snSelect.disabled = false;
+                snSelect.required = true;
+            }
         } else {
-            usageLabel.textContent = 'Pilih SN — ' + description;
-            var matchingSelect = null;
-            snSelects.forEach(function (sel) {
-                if (sel.getAttribute('data-material-id') === radio.value) {
-                    matchingSelect = sel;
-                }
-            });
-
-            if (matchingSelect && matchingSelect.options.length > 1) {
-                matchingSelect.style.display = 'block';
-                matchingSelect.disabled = false;
-                matchingSelect.required = true;
-            } else {
-                snEmptyHint.style.display = 'block';
+            inlineSection.style.display = 'none';
+            if (qtyInput) {
+                qtyInput.disabled = true;
+                qtyInput.required = false;
+                qtyInput.value = '';
+            }
+            if (snSelect) {
+                snSelect.disabled = true;
+                snSelect.required = false;
+                snSelect.value = '';
             }
         }
 
-        submitBtn.disabled = false;
+        updateSummary();
     }
 
-    materialRadios.forEach(function (radio) {
-        radio.addEventListener('change', function () { onMaterialSelected(radio); });
+    materialCheckboxes.forEach(function (checkbox) {
+        checkbox.addEventListener('change', function () { onMaterialToggled(checkbox); });
     });
+
+    updateSummary();
 });

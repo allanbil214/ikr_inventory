@@ -3,6 +3,13 @@
  * teknisi/log-usage.php
  * Expects: $assignedWOs, $categories, $materials (each with
  * available_serials), $flash, $user
+ *
+ * Phase "multi-log UX": material picking switched from a single radio
+ * (one material per submit) to checkboxes with an inline qty/SN input
+ * expanding directly under each selected card, so a technician can log
+ * everything used on a WO -- ONT, cable, etc -- in one submit, and the
+ * input field they need is always right where they clicked, not in a
+ * separate shared block at the bottom of a long scrollable list.
  */
 ?>
 <div class="container">
@@ -36,7 +43,8 @@
                 <?php endforeach; ?>
             </select>
 
-            <label>Material</label>
+            <label>Material yang digunakan</label>
+            <p class="placeholder-note">Pilih semua material yang dipakai untuk WO ini, isi jumlah/SN masing-masing, lalu catat sekaligus.</p>
             <input type="text" id="material-search" placeholder="Cari kode, deskripsi, merk..." autocomplete="off">
 
             <div class="chip-row" id="material-category-chips">
@@ -55,56 +63,69 @@
                     <?php
                         $stockDisplay = rtrim(rtrim(number_format((float) $m['stock_qty'], 2, '.', ''), '0'), '.');
                         $searchBlob = strtolower($m['item_code'] . ' ' . $m['description'] . ' ' . ($m['merk'] ?? ''));
+                        $isSerial = $m['tracking_type'] === 'serial';
+                        $isOutOfStock = $isSerial ? empty($m['available_serials']) : (float) $m['stock_qty'] <= 0;
                     ?>
-                    <label class="material-card material-picker-card"
-                           data-category="<?= $m['category_id'] ?>"
-                           data-search="<?= htmlspecialchars($searchBlob) ?>">
-                        <input type="radio" name="material_id" value="<?= $m['id'] ?>"
-                               class="material-picker-radio"
-                               data-tracking="<?= $m['tracking_type'] ?>"
-                               data-stock="<?= $m['stock_qty'] ?>"
-                               data-unit="<?= htmlspecialchars($m['unit']) ?>"
-                               data-description="<?= htmlspecialchars($m['description']) ?>">
-                        <div class="material-card-top">
-                            <span class="mono-code"><?= htmlspecialchars($m['item_code']) ?></span>
-                            <span class="badge badge-<?= $m['tracking_type'] ?>">
-                                <?= $m['tracking_type'] === 'serial' ? 'Serial' : 'Quantity' ?>
-                            </span>
-                        </div>
-                        <div class="material-desc"><?= htmlspecialchars($m['description']) ?></div>
-                        <div class="material-meta">
-                            <?= htmlspecialchars($m['category_name']) ?><?= $m['merk'] ? ' · ' . htmlspecialchars($m['merk']) : '' ?>
-                        </div>
-                        <div class="material-stock">
-                            <strong><?= $stockDisplay ?></strong>
-                            <span class="stock-unit"><?= htmlspecialchars($m['unit']) ?></span>
-                            <span class="stock-label"><?= $m['tracking_type'] === 'serial' ? 'tersedia' : 'stok' ?></span>
-                        </div>
-                    </label>
+                    <div class="material-picker-item" data-category="<?= $m['category_id'] ?>" data-search="<?= htmlspecialchars($searchBlob) ?>">
+                        <label class="material-card material-picker-card<?= $isOutOfStock ? ' material-card-disabled' : '' ?>">
+                            <input type="checkbox" name="material_ids[]" value="<?= $m['id'] ?>"
+                                   class="material-picker-checkbox"
+                                   data-tracking="<?= $m['tracking_type'] ?>"
+                                   data-stock="<?= $m['stock_qty'] ?>"
+                                   data-unit="<?= htmlspecialchars($m['unit']) ?>"
+                                   data-description="<?= htmlspecialchars($m['description']) ?>"
+                                   data-material-id="<?= $m['id'] ?>"
+                                   <?= $isOutOfStock ? 'disabled' : '' ?>>
+                            <div class="material-card-top">
+                                <span class="mono-code"><?= htmlspecialchars($m['item_code']) ?></span>
+                                <span class="badge badge-<?= $m['tracking_type'] ?>">
+                                    <?= $isSerial ? 'Serial' : 'Quantity' ?>
+                                </span>
+                            </div>
+                            <div class="material-desc"><?= htmlspecialchars($m['description']) ?></div>
+                            <div class="material-meta">
+                                <?= htmlspecialchars($m['category_name']) ?><?= $m['merk'] ? ' · ' . htmlspecialchars($m['merk']) : '' ?>
+                            </div>
+                            <div class="material-stock">
+                                <strong><?= $stockDisplay ?></strong>
+                                <span class="stock-unit"><?= htmlspecialchars($m['unit']) ?></span>
+                                <span class="stock-label"><?= $isSerial ? 'tersedia' : 'stok' ?></span>
+                            </div>
+                            <?php if ($isOutOfStock): ?>
+                                <span class="stock-hint stock-hint-warning">
+                                    <?= $isSerial ? 'Tidak ada SN tersedia' : 'Stok habis' ?>
+                                </span>
+                            <?php endif; ?>
+                        </label>
 
-                    <?php if ($m['tracking_type'] === 'serial'): ?>
-                        <select name="serial_id" class="sn-select" data-material-id="<?= $m['id'] ?>" disabled style="display:none;">
-                            <option value="">-- pilih SN --</option>
-                            <?php foreach ($m['available_serials'] as $sn): ?>
-                                <option value="<?= $sn['id'] ?>"><?= htmlspecialchars($sn['serial_number']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    <?php endif; ?>
+                        <?php if (!$isOutOfStock): ?>
+                            <div class="inline-usage-input" id="usage-input-<?= $m['id'] ?>" style="display:none;">
+                                <?php if ($isSerial): ?>
+                                    <label for="serial-select-<?= $m['id'] ?>">Pilih SN — <?= htmlspecialchars($m['description']) ?></label>
+                                    <select id="serial-select-<?= $m['id'] ?>" name="serial_id[<?= $m['id'] ?>]"
+                                            class="sn-select-inline" data-material-id="<?= $m['id'] ?>" disabled>
+                                        <option value="">-- pilih SN --</option>
+                                        <?php foreach ($m['available_serials'] as $sn): ?>
+                                            <option value="<?= $sn['id'] ?>"><?= htmlspecialchars($sn['serial_number']) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                <?php else: ?>
+                                    <label for="qty-input-<?= $m['id'] ?>">Jumlah Digunakan — <?= htmlspecialchars($m['description']) ?></label>
+                                    <input type="number" step="0.01" min="0.01" max="<?= $m['stock_qty'] ?>"
+                                           id="qty-input-<?= $m['id'] ?>" name="qty_used[<?= $m['id'] ?>]"
+                                           class="qty-input-inline" data-material-id="<?= $m['id'] ?>" disabled>
+                                    <span class="stock-hint">Sisa stok: <?= $stockDisplay ?> <?= htmlspecialchars($m['unit']) ?></span>
+                                <?php endif; ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
                 <?php endforeach; ?>
             </div>
 
-            <div class="usage-input-section" id="usage-input-section" style="display:none;">
-                <label id="usage-input-label" for="qty_used">Jumlah Digunakan</label>
-                <div id="qty-input-group" style="display:none;">
-                    <input type="number" step="0.01" min="0.01" id="qty_used" name="qty_used" disabled>
-                    <span class="stock-hint" id="qty-stock-hint"></span>
-                </div>
-                <p class="stock-hint" id="sn-empty-hint" style="display:none;">
-                    Tidak ada SN tersedia untuk material ini.
-                </p>
+            <div class="log-usage-summary" id="log-usage-summary">
+                <span id="log-usage-summary-text">Belum ada material dipilih</span>
+                <button type="submit" class="btn-primary" id="log-usage-submit" disabled>Catat Penggunaan</button>
             </div>
-
-            <button type="submit" class="btn-primary" id="log-usage-submit" disabled>Catat Penggunaan</button>
         </form>
 
         <div id="wo-logs-panels">
