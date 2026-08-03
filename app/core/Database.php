@@ -3,12 +3,15 @@
  * Database.php
  * Minimal PDO connection helper for the IKR Inventory mockup.
  * Default XAMPP credentials: host=localhost, user=root, password=''
+ * Port defaults to MySQL's standard 3306 -- change $port below if your
+ * local MySQL listens elsewhere (e.g. XAMPP set to 3307).
  */
 
 class Database
 {
     // --- Connection config ---
     private static string $host = 'localhost';
+    private static string $port = '3307';
     private static string $dbName = 'ikr_inventory';
     private static string $user = 'root';
     private static string $pass = '';
@@ -22,7 +25,7 @@ class Database
     public static function getConnection(): PDO
     {
         if (self::$connection === null) {
-            $dsn = "mysql:host=" . self::$host . ";dbname=" . self::$dbName . ";charset=" . self::$charset;
+            $dsn = "mysql:host=" . self::$host . ";port=" . self::$port . ";dbname=" . self::$dbName . ";charset=" . self::$charset;
 
             $options = [
                 PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
