@@ -284,6 +284,10 @@ h1, h2, h3 {
     margin-bottom: 16px;
 }
 
+#material-search + .chip-row {
+    margin-top: 12px;
+}
+
 .chip {
     flex-shrink: 0;
     padding: 7px 14px;
