@@ -47,7 +47,7 @@ if ($returnTo === 'workorder-detail') {
         </div>
     </div>
 
-    <form method="POST" action="index.php?page=usage-log-update">
+    <form method="POST" action="index.php?page=usage-log-update" id="usage-log-edit-form">
         <input type="hidden" name="id" value="<?= $log['id'] ?>">
         <input type="hidden" name="return_to" value="<?= htmlspecialchars($returnTo) ?>">
 
